@@ -43,28 +43,23 @@ def merge_numeric_tokens(tokens):
 def get_part_description_from_tokens(text_lines):
     """
     Extract PART ID and DESCRIPTION using tokenization.
-    Looks for the header line that contains "PART ID" and returns
-    the value from the data line at the expected indices.
+    Looks for the header line that contains "PART ID" and returns the corresponding data tokens.
     """
     for i, line in enumerate(text_lines):
         if "PART ID" in line:
-            header_line = line
             data_line = text_lines[i+1] if i+1 < len(text_lines) else ""
-            
-            header_tokens = merge_header_tokens(header_line.split())
-            
+            header_tokens = merge_header_tokens(line.split())
             raw_data_tokens = data_line.split()
             fixed_data_tokens = []
             for token in raw_data_tokens:
-                # Split tokens like "25.00MDI1PRD17C4-EQ" into separate parts
+                # Split tokens like "25.00MDI1PRD17C4-EQ" into separate parts.
                 match = re.match(r'^(\d+\.\d+)([A-Za-z0-9\-]+)$', token)
                 if match:
                     fixed_data_tokens.extend([match.group(1), match.group(2)])
                 else:
                     fixed_data_tokens.append(token)
             data_tokens = merge_numeric_tokens(fixed_data_tokens)
-            
-            # Assuming from our debug: PART ID is at index 2 and DESCRIPTION at index 3.
+            # From our debugging, assume PART ID is at index 2 and DESCRIPTION at index 3.
             if len(data_tokens) >= 4:
                 return data_tokens[2], data_tokens[3]
     return None, None
@@ -72,16 +67,12 @@ def get_part_description_from_tokens(text_lines):
 def get_pack_list_id_from_tokens(text_lines):
     """
     Extract PACK LIST ID using tokenization.
-    Looks for the header line that contains "PACK LIST ID" and then
-    retrieves the corresponding value from the data row.
+    Looks for the header line containing "PACK LIST ID" and then returns the corresponding data token.
     """
     for i, line in enumerate(text_lines):
         if "PACK" in line and "LIST" in line and "ID" in line:
-            header_line = line
             data_line = text_lines[i+1] if i+1 < len(text_lines) else ""
-            
-            header_tokens = merge_header_tokens(header_line.split())
-            
+            header_tokens = merge_header_tokens(line.split())
             raw_data_tokens = data_line.split()
             fixed_data_tokens = []
             for token in raw_data_tokens:
@@ -91,14 +82,13 @@ def get_pack_list_id_from_tokens(text_lines):
                 else:
                     fixed_data_tokens.append(token)
             data_tokens = merge_numeric_tokens(fixed_data_tokens)
-            
             if "PACK LIST ID" in header_tokens:
                 idx = header_tokens.index("PACK LIST ID")
                 if idx < len(data_tokens):
                     return data_tokens[idx]
     return None
 
-def extract_invoice_data(pdf_path):
+def extract_invoice_data(pdf_file):
     """
     Extract Invoice ID, PACK LIST ID, PART ID, DESCRIPTION, and Harmonization Code from the PDF.
     """
@@ -110,59 +100,53 @@ def extract_invoice_data(pdf_path):
         'Harmonization Code': None
     }
     
-    with pdfplumber.open(pdf_path) as pdf:
+    with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text:
                 continue
             
-            # Extract Invoice ID from text
+            # Extract Invoice ID
             if invoice_data['Invoice ID'] is None:
                 match = re.search(r'Invoice ID:\s*(\S+)', text)
                 if match:
                     invoice_data['Invoice ID'] = match.group(1)
             
-            # Extract Harmonization Code from text
+            # Extract Harmonization Code
             if invoice_data['Harmonization Code'] is None:
                 match = re.search(r'Harmonization Code:\s*([\d\.]+)', text)
                 if match:
                     invoice_data['Harmonization Code'] = match.group(1)
             
-            # Token-based extraction for PART ID, DESCRIPTION, and PACK LIST ID.
             lines = text.splitlines()
             
-            # Extract PART ID and DESCRIPTION
+            # Token-based extraction for PART ID and DESCRIPTION
             part_id, description = get_part_description_from_tokens(lines)
             if part_id and description:
                 invoice_data['PART ID'] = part_id
                 invoice_data['DESCRIPTION'] = description
             
-            # Extract PACK LIST ID
+            # Token-based extraction for PACK LIST ID
             pack_list_id = get_pack_list_id_from_tokens(lines)
             if pack_list_id:
                 invoice_data['PACK LIST ID'] = pack_list_id
             
-            # Break early if all fields are found
             if all(invoice_data.values()):
                 break
     
     return invoice_data
 
-# Streamlit App
-st.title("PDF Invoice Reader")
-st.markdown("Upload a PDF file, and we will extract the key invoice data for you.")
+# Streamlit UI
+st.title("PDF Invoice Data Extractor")
+st.write("Upload a PDF invoice file to extract key fields like Invoice ID, PACK LIST ID, PART ID, DESCRIPTION, and Harmonization Code.")
 
-uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
+uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
 if uploaded_file is not None:
-    with st.spinner("Processing file..."):
-        invoice_data_list = extract_invoice_data(uploaded_file)
-        if invoice_data_list:
-            df = pd.DataFrame(invoice_data_list)
-            if not df.empty:
-                st.success("Extraction complete!")
-                st.dataframe(df.style.set_properties(**{'text-align': 'left'}))
-            else:
-                st.error("Extracted data is empty. Please check the PDF content.")
-        else:
-            st.error("No valid invoice data found in the PDF.")
+    try:
+        invoice_data = extract_invoice_data(uploaded_file)
+        df = pd.DataFrame([invoice_data])
+        st.markdown("### Extracted Invoice Data")
+        st.dataframe(df)
+    except Exception as e:
+        st.error(f"An error occurred while processing the PDF: {e}")
