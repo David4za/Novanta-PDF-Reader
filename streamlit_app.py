@@ -137,7 +137,7 @@ def extract_invoice_data(pdf_file):
     return invoice_data
 
 # Streamlit UI
-st.title("PDF Invoice Data Extractor")
+st.title("Novanta PDF Reader")
 st.write("Upload a PDF")
 
 uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
