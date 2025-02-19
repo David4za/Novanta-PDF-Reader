@@ -107,13 +107,16 @@ def extract_invoice_data(pdf_file):
 
 # Streamlit App
 st.title("PDF Invoice Reader")
-st.markdown("Upload a PDF file, and we will extract the key invoice data for you.")
+st.markdown("Upload a PDF file")
 
 uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
 
 if uploaded_file is not None:
     with st.spinner("Processing file..."):
-        invoice_data = extract_invoice_data(uploaded_file)
-        df = pd.DataFrame([invoice_data])
-        st.success("Extraction complete!")
-        st.dataframe(df.style.set_properties(**{'text-align': 'left'}))
+        invoice_data_list = extract_invoice_data(uploaded_file)
+        if invoice_data_list:
+            df = pd.DataFrame(invoice_data_list)
+            st.success("Extraction complete!")
+            st.dataframe(df.style.set_properties(**{'text-align': 'left'}))
+        else:
+            st.error("No valid invoice data found in the PDF.")
