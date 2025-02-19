@@ -146,7 +146,7 @@ if uploaded_file is not None:
     try:
         invoice_data = extract_invoice_data(uploaded_file)
         df = pd.DataFrame([invoice_data])
-        st.markdown("### Extracted Invoice Data")
+        st.markdown("### Invoice Data")
         st.dataframe(df)
     except Exception as e:
         st.error(f"An error occurred while processing the PDF: {e}")
