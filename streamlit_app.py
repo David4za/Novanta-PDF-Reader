@@ -138,7 +138,7 @@ def extract_invoice_data(pdf_file):
 
 # Streamlit UI
 st.title("PDF Invoice Data Extractor")
-st.write("Upload a PDF invoice file to extract key fields like Invoice ID, PACK LIST ID, PART ID, DESCRIPTION, and Harmonization Code.")
+st.write("Upload a PDF")
 
 uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
