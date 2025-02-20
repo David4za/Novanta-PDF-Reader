@@ -163,6 +163,7 @@ def get_ship_to_address(text):
     Extract the Ship To Address from the block following the header:
     "Bill To Address Ship To Address"
     Uses a heuristic to split each line into two halves and take the right (ship-to) side.
+    Stops reading once a line equals "NL".
     """
     lines = text.splitlines()
     start_index = None
@@ -174,14 +175,14 @@ def get_ship_to_address(text):
         return None
     addr_lines = []
     for line in lines[start_index+1:]:
-        if line.strip() == "":
+        if line.strip() == "" or line.strip() == "NL":
             break
         tokens = line.split()
         n = len(tokens)
         if n % 2 == 0:
             first_half = " ".join(tokens[:n//2])
             second_half = " ".join(tokens[n//2:])
-            # If both halves are the same, we just take one; otherwise, we assume the ship-to part is the second half.
+            # If both halves are the same, we just take one; otherwise, assume ship-to is the second half.
             addr_lines.append(second_half)
         else:
             addr_lines.append(line)
