@@ -284,24 +284,12 @@ if uploaded_files:
             
             # For each part, create a row that includes all invoice-level and part-level details.
             for part in inv_data["PARTS"]:
-                harmonization_code = inv_data["Harmonization Code"]
-
-                # Create rainbow-colored text using CSS gradients
-                rainbow_text = f"""
-                <p style="background: -webkit-linear-gradient(left, red, orange, yellow, green, cyan, blue, violet);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        font-weight: bold;
-                        font-size: 18px;
-                        margin: 0;">
-                    {harmonization_code}
-                </p>
-                """
+     
                 row = {
                     "Filename": filename,
                     "Invoice ID": inv_data["Invoice ID"],
                     "PACK LIST ID": inv_data["PACK LIST ID"],
-                    "Harmonization Code":rainbow_text,
+                    "Harmonization Code":inv_data["Harmonization Code"],
                     "Customer PO": inv_data["Customer PO"],
                     "PART ID": part[0],
                     "Description": part[1],
