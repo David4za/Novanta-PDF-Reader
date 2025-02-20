@@ -3,6 +3,9 @@ import pdfplumber
 import re
 import pandas as pd
 
+import pdfplumber
+import re
+
 def merge_header_tokens(tokens):
     """
     Merge consecutive tokens for multi-word headers.
@@ -40,39 +43,74 @@ def merge_numeric_tokens(tokens):
             merged.append(tokens[i])
     return merged
 
-def get_part_description_from_tokens(text_lines):
+def get_all_parts(text):
     """
-    Extract PART ID and DESCRIPTION using tokenization.
-    Looks for the header line that contains "PART ID" and returns the corresponding data tokens.
+    Extracts all PART IDs and their DESCRIPTIONS from the parts table in the text.
+    It finds the header line (which contains "PART ID" and "DESCRIPTION"),
+    then collects subsequent lines until "Country MFG:" is encountered.
+    
+    It also merges a line that is purely numeric with the previous row,
+    since your data shows those extra numeric lines.
     """
-    for i, line in enumerate(text_lines):
-        if "PART ID" in line:
-            data_line = text_lines[i+1] if i+1 < len(text_lines) else ""
-            header_tokens = merge_header_tokens(line.split())
-            raw_data_tokens = data_line.split()
-            fixed_data_tokens = []
-            for token in raw_data_tokens:
-                # Split tokens like "25.00MDI1PRD17C4-EQ" into separate parts.
-                match = re.match(r'^(\d+\.\d+)([A-Za-z0-9\-]+)$', token)
-                if match:
-                    fixed_data_tokens.extend([match.group(1), match.group(2)])
-                else:
-                    fixed_data_tokens.append(token)
-            data_tokens = merge_numeric_tokens(fixed_data_tokens)
-            # From our debugging, assume PART ID is at index 2 and DESCRIPTION at index 3.
-            if len(data_tokens) >= 4:
-                return data_tokens[2], data_tokens[3]
-    return None, None
+    lines = text.splitlines()
+    header_index = None
+    for i, line in enumerate(lines):
+        if "PART ID" in line and "DESCRIPTION" in line:
+            header_index = i
+            break
+    if header_index is None:
+        return []
+    
+    # Gather all rows from after the header until "Country MFG:" is found
+    rows = []
+    i = header_index + 1
+    while i < len(lines):
+        if "Country MFG:" in lines[i]:
+            break
+        if not lines[i].strip():
+            i += 1
+            continue
+        # If the line is purely numeric (like "00003"), append it to the previous row
+        if re.match(r'^\d+$', lines[i].strip()):
+            if rows:
+                rows[-1] = rows[-1] + " " + lines[i].strip()
+            i += 1
+            continue
+        rows.append(lines[i].strip())
+        i += 1
+
+    parts = []
+    for row in rows:
+        tokens = row.split()
+        if len(tokens) < 3:
+            continue
+        # In your table the columns are: ORDERED, SHIPPED (merged with PART ID), DESCRIPTION, PRICE, ...
+        # Remove the leading numeric from token[1] to extract the actual PART ID.
+        part_token = tokens[1]
+        part_id = re.sub(r'^\d+\.\d+', '', part_token)
+        
+        # The description is all tokens from index 2 until the first token starting with "$"
+        desc_tokens = []
+        for token in tokens[2:]:
+            if token.startswith('$'):
+                break
+            desc_tokens.append(token)
+        description = " ".join(desc_tokens)
+        parts.append((part_id, description))
+    return parts
 
 def get_pack_list_id_from_tokens(text_lines):
     """
     Extract PACK LIST ID using tokenization.
-    Looks for the header line containing "PACK LIST ID" and then returns the corresponding data token.
+    Looks for the header line that contains "PACK LIST ID" and then
+    retrieves the corresponding value from the data row.
     """
     for i, line in enumerate(text_lines):
         if "PACK" in line and "LIST" in line and "ID" in line:
+            header_line = line
             data_line = text_lines[i+1] if i+1 < len(text_lines) else ""
-            header_tokens = merge_header_tokens(line.split())
+            
+            header_tokens = merge_header_tokens(header_line.split())
             raw_data_tokens = data_line.split()
             fixed_data_tokens = []
             for token in raw_data_tokens:
@@ -82,30 +120,31 @@ def get_pack_list_id_from_tokens(text_lines):
                 else:
                     fixed_data_tokens.append(token)
             data_tokens = merge_numeric_tokens(fixed_data_tokens)
+            
             if "PACK LIST ID" in header_tokens:
                 idx = header_tokens.index("PACK LIST ID")
                 if idx < len(data_tokens):
                     return data_tokens[idx]
     return None
 
-def extract_invoice_data(pdf_file):
+def extract_invoice_data(pdf_path):
     """
-    Extract Invoice ID, PACK LIST ID, PART ID, DESCRIPTION, and Harmonization Code from the PDF.
+    Extract Invoice ID, PACK LIST ID, all PART IDs with their DESCRIPTIONS,
+    and Harmonization Code from the PDF.
     """
     invoice_data = {
         'Invoice ID': None,
         'PACK LIST ID': None,
-        'PART ID': None,
-        'DESCRIPTION': None,
-        'Harmonization Code': None
+        'Harmonization Code': None,
+        'PARTS': []  # List of tuples: (PART ID, DESCRIPTION)
     }
     
-    with pdfplumber.open(pdf_file) as pdf:
+    with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text:
                 continue
-            
+
             # Extract Invoice ID
             if invoice_data['Invoice ID'] is None:
                 match = re.search(r'Invoice ID:\s*(\S+)', text)
@@ -120,18 +159,19 @@ def extract_invoice_data(pdf_file):
             
             lines = text.splitlines()
             
-            # Token-based extraction for PART ID and DESCRIPTION
-            part_id, description = get_part_description_from_tokens(lines)
-            if part_id and description:
-                invoice_data['PART ID'] = part_id
-                invoice_data['DESCRIPTION'] = description
-            
-            # Token-based extraction for PACK LIST ID
+            # Extract PACK LIST ID
             pack_list_id = get_pack_list_id_from_tokens(lines)
-            if pack_list_id:
+            if pack_list_id and invoice_data['PACK LIST ID'] is None:
                 invoice_data['PACK LIST ID'] = pack_list_id
+
+            # Extract all parts from the table
+            parts = get_all_parts(text)
+            if parts:
+                invoice_data['PARTS'].extend(parts)
             
-            if all(invoice_data.values()):
+            # If all key fields are found, we can break out early
+            if (invoice_data['Invoice ID'] and invoice_data['Harmonization Code'] and
+                invoice_data['PACK LIST ID'] and invoice_data['PARTS']):
                 break
     
     return invoice_data
