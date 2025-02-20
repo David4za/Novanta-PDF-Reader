@@ -285,7 +285,7 @@ if uploaded_files:
             # For each part, create a row that includes all invoice-level and part-level details.
             for part in inv_data["PARTS"]:
                 row = {
-                    "Filename": [:rainbow[filename]],
+                    "Filename": filename,
                     "Invoice ID": inv_data["Invoice ID"],
                     "PACK LIST ID": inv_data["PACK LIST ID"],
                     "Harmonization Code": inv_data["Harmonization Code"],
