@@ -276,7 +276,8 @@ def extract_invoice_data(pdf_file):
                 break
     
     return invoice_data
-
+# Streamlit    
+uploaded_files = st.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)
 # After processing each uploaded PDF:
 if uploaded_files:
     all_rows = []
