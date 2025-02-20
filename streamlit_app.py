@@ -4,6 +4,10 @@ import re
 import pandas as pd
 
 def merge_header_tokens(tokens):
+    """
+    Merge multi-word header tokens.
+    Now also merges "SHIPPING METHOD" and "SHIP DATE".
+    """
     merged = []
     i = 0
     while i < len(tokens):
@@ -13,12 +17,22 @@ def merge_header_tokens(tokens):
         elif i+1 < len(tokens) and tokens[i] == "PART" and tokens[i+1] == "ID":
             merged.append("PART ID")
             i += 2
+        elif i+1 < len(tokens) and tokens[i] == "SHIPPING" and tokens[i+1] == "METHOD":
+            merged.append("SHIPPING METHOD")
+            i += 2
+        elif i+1 < len(tokens) and tokens[i] == "SHIP" and tokens[i+1] == "DATE":
+            merged.append("SHIP DATE")
+            i += 2
         else:
             merged.append(tokens[i])
             i += 1
     return merged
 
 def merge_numeric_tokens(tokens):
+    """
+    Merge tokens that appear to be split parts of a number.
+    For example, merge ['25.0', '0'] into ['25.00'].
+    """
     merged = []
     skip_next = False
     for i in range(len(tokens)):
@@ -33,6 +47,10 @@ def merge_numeric_tokens(tokens):
     return merged
 
 def get_all_parts(text):
+    """
+    Extract parts from the parts table.
+    Returns a list of tuples: (PART ID, DESCRIPTION, Unit Price, Extended Price)
+    """
     lines = text.splitlines()
     header_index = None
     for i, line in enumerate(lines):
@@ -42,6 +60,7 @@ def get_all_parts(text):
     if header_index is None:
         return []
     
+    # Collect rows until "Country MFG:" is encountered
     rows = []
     i = header_index + 1
     while i < len(lines):
@@ -50,6 +69,7 @@ def get_all_parts(text):
         if not lines[i].strip():
             i += 1
             continue
+        # If the line is purely numeric (e.g., "00003"), append it to the previous row
         if re.match(r'^\d+$', lines[i].strip()):
             if rows:
                 rows[-1] = rows[-1] + " " + lines[i].strip()
@@ -63,18 +83,33 @@ def get_all_parts(text):
         tokens = row.split()
         if len(tokens) < 3:
             continue
+        # token[1] holds the shipped amount and PART ID combined;
+        # strip the numeric part to get the actual PART ID.
         part_token = tokens[1]
         part_id = re.sub(r'^\d+\.\d+', '', part_token)
+        
+        # Extract the description tokens until we hit the first token starting with '$'
+        # Then capture the next two price tokens as Unit Price and Extended Price.
         desc_tokens = []
+        price_tokens = []
         for token in tokens[2:]:
             if token.startswith('$'):
-                break
-            desc_tokens.append(token)
+                price_tokens.append(token)
+            else:
+                if not price_tokens:
+                    desc_tokens.append(token)
+                else:
+                    price_tokens.append(token)
         description = " ".join(desc_tokens)
-        parts.append((part_id, description))
+        unit_price = price_tokens[0] if len(price_tokens) >= 1 else None
+        extended_price = price_tokens[1] if len(price_tokens) >= 2 else None
+        parts.append((part_id, description, unit_price, extended_price))
     return parts
 
 def get_pack_list_id_from_tokens(text_lines):
+    """
+    Extract PACK LIST ID from the header and its following data row.
+    """
     for i, line in enumerate(text_lines):
         if "PACK" in line and "LIST" in line and "ID" in line:
             header_line = line
@@ -95,12 +130,93 @@ def get_pack_list_id_from_tokens(text_lines):
                     return data_tokens[idx]
     return None
 
+def get_shipping_info(text_lines):
+    """
+    Extract Shipping Method and Ship Date from the shipping info block.
+    Expected header example:
+    "PACK LIST ID SALES REP ID SHIPPING METHOD SHIP DATE INVOICE DUE DATE"
+    and then a data row.
+    """
+    shipping_method = None
+    ship_date = None
+    for i, line in enumerate(text_lines):
+        if "SHIPPING METHOD" in line and "SHIP DATE" in line:
+            header_tokens = merge_header_tokens(line.split())
+            if i+1 < len(text_lines):
+                data_line = text_lines[i+1]
+                data_tokens = data_line.split()
+                try:
+                    # Find the index for SHIPPING METHOD in the header
+                    ship_method_idx = header_tokens.index("SHIPPING METHOD")
+                    # Collect tokens from that index until a token matching a date is found.
+                    date_pattern = r'^\d{2}/\d{2}/\d{4}$'
+                    shipping_method_tokens = []
+                    j = ship_method_idx
+                    while j < len(data_tokens) and not re.match(date_pattern, data_tokens[j]):
+                        shipping_method_tokens.append(data_tokens[j])
+                        j += 1
+                    shipping_method = " ".join(shipping_method_tokens)
+                    # Ship date is the first token that looks like a date.
+                    for token in data_tokens:
+                        if re.match(date_pattern, token):
+                            ship_date = token
+                            break
+                except Exception:
+                    pass
+            break
+    return shipping_method, ship_date
+
+def get_ship_to_address(text):
+    """
+    Extract the Ship To Address from the block following the header:
+    "Bill To Address Ship To Address"
+    Uses a heuristic to split each line into two halves and take the right (ship-to) side.
+    """
+    lines = text.splitlines()
+    start_index = None
+    for i, line in enumerate(lines):
+        if "Bill To Address" in line and "Ship To Address" in line:
+            start_index = i
+            break
+    if start_index is None:
+        return None
+    addr_lines = []
+    for line in lines[start_index+1:]:
+        if line.strip() == "":
+            break
+        tokens = line.split()
+        n = len(tokens)
+        if n % 2 == 0:
+            first_half = " ".join(tokens[:n//2])
+            second_half = " ".join(tokens[n//2:])
+            # If both halves are the same, we just take one; otherwise, we assume the ship-to part is the second half.
+            addr_lines.append(second_half)
+        else:
+            addr_lines.append(line)
+    return "\n".join(addr_lines)
+
 def extract_invoice_data(pdf_file):
+    """
+    Extract various fields from the PDF.
+    Returns a dictionary with keys:
+      - Invoice ID
+      - PACK LIST ID
+      - Harmonization Code
+      - Customer PO (starts with 450)
+      - Shipping Method
+      - Ship Date
+      - Ship To Address
+      - PARTS: list of tuples (PART ID, DESCRIPTION, Unit Price, Extended Price)
+    """
     invoice_data = {
         'Invoice ID': None,
         'PACK LIST ID': None,
         'Harmonization Code': None,
-        'PARTS': []  # List of tuples: (PART ID, DESCRIPTION)
+        'Customer PO': None,
+        'Shipping Method': None,
+        'Ship Date': None,
+        'Ship To Address': None,
+        'PARTS': []  # List of tuples: (PART ID, DESCRIPTION, Unit Price, Extended Price)
     }
     
     with pdfplumber.open(pdf_file) as pdf:
@@ -108,27 +224,57 @@ def extract_invoice_data(pdf_file):
             text = page.extract_text()
             if not text:
                 continue
+            
+            # Invoice ID
             if invoice_data['Invoice ID'] is None:
                 match = re.search(r'Invoice ID:\s*(\S+)', text)
                 if match:
                     invoice_data['Invoice ID'] = match.group(1)
+            
+            # Harmonization Code
             if invoice_data['Harmonization Code'] is None:
                 match = re.search(r'Harmonization Code:\s*([\d\.]+)', text)
                 if match:
                     invoice_data['Harmonization Code'] = match.group(1)
             
+            # Customer PO (starts with 450)
+            if invoice_data['Customer PO'] is None:
+                match = re.search(r'\b(450\d+)\b', text)
+                if match:
+                    invoice_data['Customer PO'] = match.group(1)
+            
             lines = text.splitlines()
+            
+            # PACK LIST ID
             pack_list_id = get_pack_list_id_from_tokens(lines)
             if pack_list_id and invoice_data['PACK LIST ID'] is None:
                 invoice_data['PACK LIST ID'] = pack_list_id
 
+            # Parts table (including Unit Price and Extended Price)
             parts = get_all_parts(text)
             if parts:
                 invoice_data['PARTS'].extend(parts)
             
+            # Shipping info: Shipping Method and Ship Date
+            shipping_method, ship_date = get_shipping_info(lines)
+            if shipping_method and invoice_data['Shipping Method'] is None:
+                invoice_data['Shipping Method'] = shipping_method
+            if ship_date and invoice_data['Ship Date'] is None:
+                invoice_data['Ship Date'] = ship_date
+            
+            # Ship To Address
+            if invoice_data['Ship To Address'] is None:
+                ship_to = get_ship_to_address(text)
+                if ship_to:
+                    invoice_data['Ship To Address'] = ship_to
+            
+            # Optionally break early if all fields are found
             if (invoice_data['Invoice ID'] and invoice_data['Harmonization Code'] and
-                invoice_data['PACK LIST ID'] and invoice_data['PARTS']):
+                invoice_data['PACK LIST ID'] and invoice_data['Customer PO'] and
+                invoice_data['Shipping Method'] and invoice_data['Ship Date'] and
+                invoice_data['Ship To Address'] and invoice_data['PARTS']):
                 break
+    
     return invoice_data
 
 # Streamlit UI
@@ -138,20 +284,27 @@ st.write("Upload one or more PDFs")
 uploaded_files = st.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
-    # We'll create a list to store rows of data.
     all_rows = []
-    
     for uploaded_file in uploaded_files:
         try:
             inv_data = extract_invoice_data(uploaded_file)
-            # Flatten the data: one row per part, duplicating invoice-level info.
+            filename = uploaded_file.name  # Filename from uploader
+            
+            # For each part, create a row that includes both invoice-level and part-level data.
             for part in inv_data["PARTS"]:
                 row = {
+                    "Filename": filename,
                     "Invoice ID": inv_data["Invoice ID"],
                     "PACK LIST ID": inv_data["PACK LIST ID"],
                     "Harmonization Code": inv_data["Harmonization Code"],
+                    "Customer PO": inv_data["Customer PO"],
                     "PART ID": part[0],
-                    "DESCRIPTION": part[1]
+                    "Description": part[1],
+                    "Unit Price": part[2],
+                    "Extended Price": part[3],
+                    "Shipping Method": inv_data["Shipping Method"],
+                    "Ship Date": inv_data["Ship Date"],
+                    "Ship To Address": inv_data["Ship To Address"]
                 }
                 all_rows.append(row)
         except Exception as e:
