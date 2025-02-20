@@ -301,7 +301,7 @@ if uploaded_files:
                     "Filename": filename,
                     "Invoice ID": inv_data["Invoice ID"],
                     "PACK LIST ID": inv_data["PACK LIST ID"],
-                    "Harmonization Code": inv_data["Harmonization Code"],
+                    "Harmonization Code":rainbow_text,
                     "Customer PO": inv_data["Customer PO"],
                     "PART ID": part[0],
                     "Description": part[1],
