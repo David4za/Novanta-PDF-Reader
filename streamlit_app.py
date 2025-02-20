@@ -3,9 +3,6 @@ import pdfplumber
 import re
 import pandas as pd
 
-import pdfplumber
-import re
-
 def merge_header_tokens(tokens):
     """
     Merge consecutive tokens for multi-word headers.
@@ -185,8 +182,24 @@ uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 if uploaded_file is not None:
     try:
         invoice_data = extract_invoice_data(uploaded_file)
-        df = pd.DataFrame([invoice_data])
+        
+        # Display basic invoice data excluding parts
+        basic_data = {
+            "Invoice ID": invoice_data["Invoice ID"],
+            "PACK LIST ID": invoice_data["PACK LIST ID"],
+            "Harmonization Code": invoice_data["Harmonization Code"],
+        }
+        df_basic = pd.DataFrame([basic_data])
         st.markdown("### Invoice Data")
-        st.dataframe(df)
+        st.dataframe(df_basic)
+        
+        # Create a DataFrame for parts with two columns: PART ID and DESCRIPTION.
+        if invoice_data["PARTS"]:
+            parts_df = pd.DataFrame(invoice_data["PARTS"], columns=["PART ID", "DESCRIPTION"])
+            st.markdown("### Parts Data")
+            st.dataframe(parts_df)
+        else:
+            st.write("No parts found.")
+        
     except Exception as e:
         st.error(f"An error occurred while processing the PDF: {e}")
