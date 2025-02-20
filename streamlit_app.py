@@ -4,10 +4,6 @@ import re
 import pandas as pd
 
 def merge_header_tokens(tokens):
-    """
-    Merge consecutive tokens for multi-word headers.
-    Merge "PACK", "LIST", "ID" to "PACK LIST ID" and "PART", "ID" to "PART ID".
-    """
     merged = []
     i = 0
     while i < len(tokens):
@@ -23,10 +19,6 @@ def merge_header_tokens(tokens):
     return merged
 
 def merge_numeric_tokens(tokens):
-    """
-    Merge tokens that appear to be a split number.
-    For example, merge ['25.0', '0'] into ['25.00'].
-    """
     merged = []
     skip_next = False
     for i in range(len(tokens)):
@@ -41,14 +33,6 @@ def merge_numeric_tokens(tokens):
     return merged
 
 def get_all_parts(text):
-    """
-    Extracts all PART IDs and their DESCRIPTIONS from the parts table in the text.
-    It finds the header line (which contains "PART ID" and "DESCRIPTION"),
-    then collects subsequent lines until "Country MFG:" is encountered.
-    
-    It also merges a line that is purely numeric with the previous row,
-    since your data shows those extra numeric lines.
-    """
     lines = text.splitlines()
     header_index = None
     for i, line in enumerate(lines):
@@ -58,7 +42,6 @@ def get_all_parts(text):
     if header_index is None:
         return []
     
-    # Gather all rows from after the header until "Country MFG:" is found
     rows = []
     i = header_index + 1
     while i < len(lines):
@@ -67,7 +50,6 @@ def get_all_parts(text):
         if not lines[i].strip():
             i += 1
             continue
-        # If the line is purely numeric (like "00003"), append it to the previous row
         if re.match(r'^\d+$', lines[i].strip()):
             if rows:
                 rows[-1] = rows[-1] + " " + lines[i].strip()
@@ -81,12 +63,8 @@ def get_all_parts(text):
         tokens = row.split()
         if len(tokens) < 3:
             continue
-        # In your table the columns are: ORDERED, SHIPPED (merged with PART ID), DESCRIPTION, PRICE, ...
-        # Remove the leading numeric from token[1] to extract the actual PART ID.
         part_token = tokens[1]
         part_id = re.sub(r'^\d+\.\d+', '', part_token)
-        
-        # The description is all tokens from index 2 until the first token starting with "$"
         desc_tokens = []
         for token in tokens[2:]:
             if token.startswith('$'):
@@ -97,16 +75,10 @@ def get_all_parts(text):
     return parts
 
 def get_pack_list_id_from_tokens(text_lines):
-    """
-    Extract PACK LIST ID using tokenization.
-    Looks for the header line that contains "PACK LIST ID" and then
-    retrieves the corresponding value from the data row.
-    """
     for i, line in enumerate(text_lines):
         if "PACK" in line and "LIST" in line and "ID" in line:
             header_line = line
             data_line = text_lines[i+1] if i+1 < len(text_lines) else ""
-            
             header_tokens = merge_header_tokens(header_line.split())
             raw_data_tokens = data_line.split()
             fixed_data_tokens = []
@@ -117,18 +89,13 @@ def get_pack_list_id_from_tokens(text_lines):
                 else:
                     fixed_data_tokens.append(token)
             data_tokens = merge_numeric_tokens(fixed_data_tokens)
-            
             if "PACK LIST ID" in header_tokens:
                 idx = header_tokens.index("PACK LIST ID")
                 if idx < len(data_tokens):
                     return data_tokens[idx]
     return None
 
-def extract_invoice_data(pdf_path):
-    """
-    Extract Invoice ID, PACK LIST ID, all PART IDs with their DESCRIPTIONS,
-    and Harmonization Code from the PDF.
-    """
+def extract_invoice_data(pdf_file):
     invoice_data = {
         'Invoice ID': None,
         'PACK LIST ID': None,
@@ -136,70 +103,63 @@ def extract_invoice_data(pdf_path):
         'PARTS': []  # List of tuples: (PART ID, DESCRIPTION)
     }
     
-    with pdfplumber.open(pdf_path) as pdf:
+    with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text:
                 continue
-
-            # Extract Invoice ID
             if invoice_data['Invoice ID'] is None:
                 match = re.search(r'Invoice ID:\s*(\S+)', text)
                 if match:
                     invoice_data['Invoice ID'] = match.group(1)
-            
-            # Extract Harmonization Code
             if invoice_data['Harmonization Code'] is None:
                 match = re.search(r'Harmonization Code:\s*([\d\.]+)', text)
                 if match:
                     invoice_data['Harmonization Code'] = match.group(1)
             
             lines = text.splitlines()
-            
-            # Extract PACK LIST ID
             pack_list_id = get_pack_list_id_from_tokens(lines)
             if pack_list_id and invoice_data['PACK LIST ID'] is None:
                 invoice_data['PACK LIST ID'] = pack_list_id
 
-            # Extract all parts from the table
             parts = get_all_parts(text)
             if parts:
                 invoice_data['PARTS'].extend(parts)
             
-            # If all key fields are found, we can break out early
             if (invoice_data['Invoice ID'] and invoice_data['Harmonization Code'] and
                 invoice_data['PACK LIST ID'] and invoice_data['PARTS']):
                 break
-    
     return invoice_data
 
 # Streamlit UI
 st.title("Novanta PDF Reader")
-st.write("Upload a PDF")
+st.write("Upload one or more PDFs")
 
-uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+uploaded_files = st.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)
 
-if uploaded_file is not None:
-    try:
-        invoice_data = extract_invoice_data(uploaded_file)
-        
-        # Display basic invoice data excluding parts
-        basic_data = {
-            "Invoice ID": invoice_data["Invoice ID"],
-            "PACK LIST ID": invoice_data["PACK LIST ID"],
-            "Harmonization Code": invoice_data["Harmonization Code"],
-        }
-        df_basic = pd.DataFrame([basic_data])
-        st.markdown("### Invoice Data")
-        st.dataframe(df_basic)
-        
-        # Create a DataFrame for parts with two columns: PART ID and DESCRIPTION.
-        if invoice_data["PARTS"]:
-            parts_df = pd.DataFrame(invoice_data["PARTS"], columns=["PART ID", "DESCRIPTION"])
-            st.markdown("### Parts Data")
-            st.dataframe(parts_df)
-        else:
-            st.write("No parts found.")
-        
-    except Exception as e:
-        st.error(f"An error occurred while processing the PDF: {e}")
+if uploaded_files:
+    # We'll create a list to store rows of data.
+    all_rows = []
+    
+    for uploaded_file in uploaded_files:
+        try:
+            inv_data = extract_invoice_data(uploaded_file)
+            # Flatten the data: one row per part, duplicating invoice-level info.
+            for part in inv_data["PARTS"]:
+                row = {
+                    "Invoice ID": inv_data["Invoice ID"],
+                    "PACK LIST ID": inv_data["PACK LIST ID"],
+                    "Harmonization Code": inv_data["Harmonization Code"],
+                    "PART ID": part[0],
+                    "DESCRIPTION": part[1]
+                }
+                all_rows.append(row)
+        except Exception as e:
+            st.error(f"Error processing file {uploaded_file.name}: {e}")
+    
+    if all_rows:
+        df = pd.DataFrame(all_rows)
+        st.markdown("### Combined Invoice Data")
+        st.dataframe(df)
+    else:
+        st.write("No data extracted from the uploaded PDFs.")
