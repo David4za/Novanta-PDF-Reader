@@ -133,38 +133,30 @@ def get_pack_list_id_from_tokens(text_lines):
 def get_shipping_info(text_lines):
     """
     Extract Shipping Method and Ship Date from the shipping info block.
-    Expected header example:
+    Expects the header line like:
     "PACK LIST ID SALES REP ID SHIPPING METHOD SHIP DATE INVOICE DUE DATE"
-    and then a data row.
+    and a data row such as:
+    "182371 INTL UPS WORLDWIDE EXPEDITED COLLECT BLUE 03/28/2024 04/27/2024"
     """
     shipping_method = None
     ship_date = None
     for i, line in enumerate(text_lines):
         if "SHIPPING METHOD" in line and "SHIP DATE" in line:
-            header_tokens = merge_header_tokens(line.split())
             if i+1 < len(text_lines):
                 data_line = text_lines[i+1]
                 data_tokens = data_line.split()
-                try:
-                    # Find the index for SHIPPING METHOD in the header
-                    ship_method_idx = header_tokens.index("SHIPPING METHOD")
-                    # Collect tokens from that index until a token matching a date is found.
-                    date_pattern = r'^\d{2}/\d{2}/\d{4}$'
-                    shipping_method_tokens = []
-                    j = ship_method_idx
-                    while j < len(data_tokens) and not re.match(date_pattern, data_tokens[j]):
-                        shipping_method_tokens.append(data_tokens[j])
-                        j += 1
-                    shipping_method = " ".join(shipping_method_tokens)
-                    # Ship date is the first token that looks like a date.
-                    for token in data_tokens:
-                        if re.match(date_pattern, token):
-                            ship_date = token
-                            break
-                except Exception:
-                    pass
+                # Assuming:
+                # data_tokens[0] = PACK LIST ID
+                # data_tokens[1] = SALES REP ID
+                # data_tokens[2:-2] = SHIPPING METHOD (could be multiple tokens)
+                # data_tokens[-2] = SHIP DATE
+                # data_tokens[-1] = INVOICE DUE DATE
+                if len(data_tokens) >= 5:
+                    shipping_method = " ".join(data_tokens[2:-2])
+                    ship_date = data_tokens[-2]
             break
     return shipping_method, ship_date
+
 
 def get_ship_to_address(text):
     """
@@ -276,7 +268,10 @@ def extract_invoice_data(pdf_file):
                 break
     
     return invoice_data
-# Streamlit    
+    
+# Streamlit
+st.title("Novanta PDF Reader")
+st.write("Upload one or more PDFs")
 uploaded_files = st.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)
 # After processing each uploaded PDF:
 if uploaded_files:
