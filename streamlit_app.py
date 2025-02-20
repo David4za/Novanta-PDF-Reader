@@ -277,20 +277,15 @@ def extract_invoice_data(pdf_file):
     
     return invoice_data
 
-# Streamlit UI
-st.title("Novanta PDF Reader")
-st.write("Upload one or more PDFs")
-
-uploaded_files = st.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)
-
+# After processing each uploaded PDF:
 if uploaded_files:
     all_rows = []
     for uploaded_file in uploaded_files:
         try:
             inv_data = extract_invoice_data(uploaded_file)
-            filename = uploaded_file.name  # Filename from uploader
+            filename = uploaded_file.name  # get filename from uploader
             
-            # For each part, create a row that includes both invoice-level and part-level data.
+            # For each part, create a row that includes all invoice-level and part-level details.
             for part in inv_data["PARTS"]:
                 row = {
                     "Filename": filename,
@@ -313,6 +308,7 @@ if uploaded_files:
     if all_rows:
         df = pd.DataFrame(all_rows)
         st.markdown("### Combined Invoice Data")
-        st.dataframe(df)
+        st.write("Columns present:", df.columns.tolist())
+        st.dataframe(df, use_container_width=True)
     else:
         st.write("No data extracted from the uploaded PDFs.")
